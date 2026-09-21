@@ -79,4 +79,17 @@ define Device/generic-hmu05
 endef
 TARGET_DEVICES += generic-hmu05
 
+define Device/thwc-uf896
+	$(Device/msm8916)
+	DEVICE_VENDOR := THWC
+	DEVICE_MODEL := UF896
+	DEVICE_DTS := msm8916-thwc-uf896
+	SUPPORTED_DEVICES := thwc,uf896
+	FILESYSTEMS := squashfs
+	DEVICE_PACKAGES := wpad-basic-wolfssl rmtfs uci-usb-gadget \
+		block-mount f2fs-tools tar \
+		msm-firmware-dumper reboot-edl qcom-carrier-autocfg
+endef
+TARGET_DEVICES += thwc-uf896
+
 endif
