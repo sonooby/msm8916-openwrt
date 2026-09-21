@@ -18,6 +18,18 @@ define Build/aboot-img
 	mv $@.new $@
 endef
 
+# RAM-only test image. Keep storage-specific root= arguments out of the
+# Android boot header so fastboot boot can exercise the kernel/DTB/initramfs
+# without depending on, or modifying, the on-device GPT/rootfs.
+define Build/aboot-img-initramfs
+	mkbootimg \
+		--kernel $@ \
+		--ramdisk /dev/null \
+		--cmdline "earlycon console=tty0 console=ttyMSM0,115200" \
+		-o $@.new
+	mv $@.new $@
+endef
+
 ### Devices ###
 define Device/Default
 	PROFILES := Default
