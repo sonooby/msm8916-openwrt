@@ -89,6 +89,19 @@ define Device/thwc-uf896
 	DEVICE_PACKAGES := wpad-basic-wolfssl rmtfs uci-usb-gadget \
 		block-mount f2fs-tools tar \
 		msm-firmware-dumper reboot-edl qcom-carrier-autocfg
+
+	# Produce a RAM-only initramfs Android boot image for the first hardware
+	# test. It intentionally has no root=/dev/mmcblk... argument, so it can be
+	# started with `fastboot boot` while the working Debian eMMC stays intact.
+	KERNEL_INITRAMFS = kernel-bin | gzip | append-dtb | aboot-img-initramfs
+	KERNEL_INITRAMFS_SUFFIX := -boot.img
+
+	# Do not publish the generic MSM8916 firmware bundle/flasher for UF896.
+	# generate_firmware.sh currently builds lk2nd for yiming,uz801-v3, which is
+	# not an acceptable UF896 bootloader payload. Keep only the GPT artifact for
+	# offline inspection; it is not used for the RAM-only test.
+	ARTIFACTS := squashfs-gpt_both0.bin
+	ARTIFACT/squashfs-gpt_both0.bin := generate-squashfs-gpt
 endef
 TARGET_DEVICES += thwc-uf896
 
