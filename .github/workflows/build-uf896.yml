@@ -1,0 +1,108 @@
+name: Build UF896 OpenWrt
+
+on:
+  push:
+    branches:
+      - thwc-uf896-openwrt-25.12
+    paths:
+      - 'msm89xx/**'
+      - 'packages/**'
+      - 'diffconfigs/uf896'
+      - 'scripts/**'
+      - 'devenv/**'
+      - '.github/workflows/build-uf896.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Prepare host
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo apt-get -qq update
+          sudo -E ./devenv/dependencies.sh
+
+      - name: Read configured OpenWrt version
+        id: version
+        run: |
+          VERSION=$(grep '^OPENWRT_VERSION=' devenv/.env | cut -d= -f2)
+          test -n "$VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Building UF896 against $VERSION"
+
+      - name: Clone OpenWrt
+        run: |
+          git clone --filter=blob:none https://git.openwrt.org/openwrt/openwrt.git openwrt
+          git -C openwrt checkout "${{ steps.version.outputs.version }}"
+
+      - name: Install MSM8916 BSP and project packages
+        run: |
+          rm -rf openwrt/target/linux/msm89xx
+          cp -a msm89xx openwrt/target/linux/msm89xx
+          rm -rf openwrt/package/msm8916
+          cp -a packages openwrt/package/msm8916
+
+          if [ -d openwrt-overlay ]; then
+            cp -a openwrt-overlay/. openwrt/
+          fi
+
+          if [ -d openwrt-patches ]; then
+            for p in openwrt-patches/*.patch; do
+              [ -f "$p" ] || continue
+              if patch -p1 -d openwrt --dry-run < "$p" >/dev/null 2>&1; then
+                patch -p1 -d openwrt < "$p"
+              fi
+            done
+          fi
+
+      - name: Update and install feeds
+        working-directory: openwrt
+        run: |
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: Configure UF896
+        run: |
+          cp diffconfigs/uf896 openwrt/.config
+          cd openwrt
+          make defconfig
+          grep -q '^CONFIG_TARGET_msm89xx_msm8916_DEVICE_thwc-uf896=y$' .config
+
+      - name: Download sources
+        working-directory: openwrt
+        run: |
+          make download -j8
+          find dl -size -1024c -delete || true
+
+      - name: Build firmware
+        working-directory: openwrt
+        run: |
+          make -j"$(nproc)" || make -j1 V=s
+
+      - name: Verify UF896 output
+        run: |
+          TARGET_DIR=$(find openwrt/bin/targets/msm89xx/msm8916 -maxdepth 0 -type d | head -1)
+          test -d "$TARGET_DIR"
+          ls -lah "$TARGET_DIR"
+          test -n "$(find "$TARGET_DIR" -maxdepth 1 -type f -name '*thwc-uf896*boot.img' -print -quit)"
+          test -n "$(find "$TARGET_DIR" -maxdepth 1 -type f -name '*thwc-uf896*system.img' -print -quit)"
+          test -n "$(find "$TARGET_DIR" -maxdepth 1 -type f -name '*thwc-uf896*firmware.zip' -print -quit)"
+
+      - name: Upload UF896 firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: uf896-openwrt-${{ steps.version.outputs.version }}
+          if-no-files-found: error
+          path: |
+            openwrt/bin/targets/msm89xx/msm8916/*thwc-uf896*
+            openwrt/bin/targets/msm89xx/msm8916/config.buildinfo
+            openwrt/bin/targets/msm89xx/msm8916/sha256sums
