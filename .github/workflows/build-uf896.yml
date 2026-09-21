@@ -76,6 +76,9 @@ jobs:
           cd openwrt
           make defconfig
           grep -q '^CONFIG_TARGET_msm89xx_msm8916_DEVICE_thwc-uf896=y$' .config
+          grep -q '^CONFIG_TARGET_ROOTFS_INITRAMFS=y$' .config
+          grep -q '^CONFIG_PACKAGE_kmod-nft-tproxy=y$' .config
+          grep -q '^CONFIG_PACKAGE_ip-full=y$' .config
 
       - name: Download sources
         working-directory: openwrt
@@ -89,13 +92,70 @@ jobs:
           make -j"$(nproc)" || make -j1 V=s
 
       - name: Verify UF896 output
+        shell: bash
         run: |
-          TARGET_DIR=$(find openwrt/bin/targets/msm89xx/msm8916 -maxdepth 0 -type d | head -1)
+          set -euo pipefail
+          TARGET_DIR=openwrt/bin/targets/msm89xx/msm8916
           test -d "$TARGET_DIR"
           ls -lah "$TARGET_DIR"
-          test -n "$(find "$TARGET_DIR" -maxdepth 1 -type f -name '*thwc-uf896*boot.img' -print -quit)"
-          test -n "$(find "$TARGET_DIR" -maxdepth 1 -type f -name '*thwc-uf896*system.img' -print -quit)"
-          test -n "$(find "$TARGET_DIR" -maxdepth 1 -type f -name '*thwc-uf896*firmware.zip' -print -quit)"
+
+          BOOT=$(find "$TARGET_DIR" -maxdepth 1 -type f -name '*thwc-uf896*squashfs-boot.img' -print -quit)
+          INITRAMFS=$(find "$TARGET_DIR" -maxdepth 1 -type f -name '*thwc-uf896-initramfs-boot.img' -print -quit)
+          SYSTEM=$(find "$TARGET_DIR" -maxdepth 1 -type f -name '*thwc-uf896*system.img' -print -quit)
+          MANIFEST=$(find "$TARGET_DIR" -maxdepth 1 -type f -name '*thwc-uf896.manifest' -print -quit)
+
+          test -n "$BOOT"
+          test -n "$INITRAMFS"
+          test -n "$SYSTEM"
+          test -n "$MANIFEST"
+
+          # Both boot images must contain the UF896 DTB identity.
+          grep -aFq 'thwc,uf896' "$BOOT"
+          grep -aFq 'thwc,uf896' "$INITRAMFS"
+
+          # Parse Android boot-image cmdline. The normal image intentionally
+          # points at p14; the RAM-only initramfs image must not depend on eMMC.
+          python3 - "$BOOT" "$INITRAMFS" <<'PY'
+          import struct, sys
+
+          def cmdline(path):
+              data = open(path, 'rb').read(1632)
+              assert data[:8] == b'ANDROID!', path
+              first = data[64:576].split(b'\0', 1)[0]
+              extra = data[608:1632].split(b'\0', 1)[0]
+              return (first + extra).decode('ascii', 'replace')
+
+          normal = cmdline(sys.argv[1])
+          ram = cmdline(sys.argv[2])
+          print('normal cmdline:', normal)
+          print('initramfs cmdline:', ram)
+          assert 'root=/dev/mmcblk0p14' in normal
+          assert 'rootfstype=squashfs' in normal
+          assert 'root=' not in ram
+          PY
+
+          # Forkop's current OpenWrt/APK backend dependencies must already be
+          # in the image, including target-specific kernel modules that cannot
+          # safely be assumed to exist in the official package repository.
+          for pkg in \
+            bind-dig ca-bundle coreutils-base64 curl ip-full \
+            kmod-inet-diag kmod-netlink-diag kmod-nft-nat \
+            kmod-nft-tproxy kmod-tun nftables-json \
+            ucode ucode-mod-fs ucode-mod-uci; do
+              grep -q "^${pkg} - " "$MANIFEST" || {
+                echo "Missing required package in image: $pkg" >&2
+                exit 1
+              }
+          done
+
+          # UF896 must not publish the generic flasher/firmware bundle: the
+          # upstream generator currently hardcodes a YiMing UZ801 lk2nd target.
+          test -z "$(find "$TARGET_DIR" -maxdepth 1 -type f -name '*thwc-uf896*firmware.zip' -print -quit)"
+          test -z "$(find "$TARGET_DIR" -maxdepth 1 -type f -name '*thwc-uf896*flash.sh' -print -quit)"
+
+      - name: Verify published checksums
+        working-directory: openwrt/bin/targets/msm89xx/msm8916
+        run: sha256sum -c sha256sums
 
       - name: Upload UF896 firmware
         uses: actions/upload-artifact@v4
@@ -104,5 +164,6 @@ jobs:
           if-no-files-found: error
           path: |
             openwrt/bin/targets/msm89xx/msm8916/*thwc-uf896*
-            openwrt/bin/targets/msm89xx/msm8916/config.buildinfo
+            openwrt/bin/targets/msm89xx/msm8916/*.buildinfo
+            openwrt/bin/targets/msm89xx/msm8916/profiles.json
             openwrt/bin/targets/msm89xx/msm8916/sha256sums
