@@ -53,7 +53,7 @@ load_config() {
     # USB Device IDs
     config_get CFG_VENDOR_ID usb vendor_id "0x1d6b"
     config_get CFG_PRODUCT_ID usb product_id "0x0104"
-    config_get CFG_DEVICE_VERSION usb device_version "0x0100"
+    config_get CFG_DEVICE_VERSION usb device_version "0x0101"
     config_get CFG_MANUFACTURER usb manufacturer "OpenWrt"
     config_get CFG_PRODUCT usb product "USB Gadget"
     config_get CFG_UDC_DEVICE usb udc_device ""
@@ -93,11 +93,28 @@ error() {
 # ============================================================================
 
 get_serial_number() {
-    if [ -f /etc/machine-id ]; then
-        sha256sum < /etc/machine-id 2>/dev/null | cut -d' ' -f1 | cut -c1-16
+    local cid=""
+    local hash=""
+
+    # Stable per-device serial from eMMC CID
+    if [ -r /sys/block/mmcblk0/device/cid ]; then
+        cid="$(cat /sys/block/mmcblk0/device/cid 2>/dev/null)"
+        if [ -n "$cid" ]; then
+            hash="$(printf '%s' "$cid" | sha256sum | cut -c1-16)"
+            printf 'UF896%s\n' "$hash"
+            return
+        fi
+    fi
+
+    # Fallback to machine-id
+    if [ -s /etc/machine-id ]; then
+        hash="$(sha256sum </etc/machine-id 2>/dev/null | cut -c1-16)"
+        printf 'UF896%s\n' "$hash"
         return
     fi
-    echo "$(date +%s)-$(( $$ + 1000 ))"
+
+    # Last-resort fallback
+    printf 'UF896%s%s\n' "$(date +%s)" "$(( $$ + 1000 ))"
 }
 
 generate_mac() {
@@ -186,6 +203,13 @@ setup_ncm() {
     sysfs_write "${func}/host_addr" "$(generate_mac ncm-host)"
     sysfs_write "${func}/dev_addr" "$(generate_mac ncm-dev)"
     ln -sf "$func" "${CFG_CONFIG_PATH}/"
+    
+    # Microsoft Windows inbox UsbNcm driver auto-binding
+    sysfs_write "${CFG_GADGET_PATH}/os_desc/use" "1"
+    sysfs_write "${CFG_GADGET_PATH}/os_desc/b_vendor_code" "0xcd"
+    sysfs_write "${CFG_GADGET_PATH}/os_desc/qw_sign" "MSFT100"
+    sysfs_write "${func}/os_desc/interface.ncm/compatible_id" "WINNCM"
+    ln -sf "${CFG_CONFIG_PATH}" "${CFG_GADGET_PATH}/os_desc/"
     
     echo "+NCM"
 }
