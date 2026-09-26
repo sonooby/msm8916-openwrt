@@ -1,0 +1,45 @@
+#!/bin/sh /etc/rc.common
+
+# Same START as usb-gadget; "usb-zerocd" sorts after "usb-gadget".
+START=99
+STOP=9
+
+MODE=/usr/sbin/uf896-usb-mode
+WATCH=/usr/sbin/uf896-zerocd
+
+is_uf896() {
+    case "$(cat /tmp/sysinfo/board_name 2>/dev/null)" in
+        thwc,uf896|*uf896*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+start() {
+    is_uf896 || return 0
+
+    # Start the watcher first. It tolerates the CD function being absent and
+    # then observes the complete insertion sequence. Its startup grace also
+    # recovers an immediate stale Windows eject without changing USB mode.
+    "$WATCH" start
+
+    if ! "$MODE" overlay-now; then
+        logger -t uf896-zerocd "cannot append tools CD-ROM; leaving stock USB gadget untouched"
+        "$WATCH" stop 2>/dev/null || true
+        return 1
+    fi
+}
+
+stop() {
+    is_uf896 || return 0
+    "$WATCH" stop 2>/dev/null || true
+    "$MODE" remove-cd-now 2>/dev/null || true
+}
+
+restart() {
+    stop
+    start
+}
+
+reload() {
+    restart
+}
