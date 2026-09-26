@@ -1,0 +1,333 @@
+#!/bin/sh
+
+# UF896 USB mode manager.
+# This is an add-on layer: it does NOT replace /usr/sbin/usb-gadget.
+# NORMAL is rebuilt by the existing proven usb-gadget service, then a read-only
+# CD-ROM function is appended. LEGACY is the proven RNDIS-first layout.
+
+G=/sys/kernel/config/usb_gadget/g1
+C="$G/configs/c.1"
+F="$G/functions"
+N="$F/ncm.usb0"
+R="$F/rndis.usb0"
+A="$F/acm.GS0"
+M="$F/mass_storage.tools"
+ISO=/usr/share/usb-gadget/UF896_TOOLS.iso
+ISO_MIN_BYTES=614400
+MODEFILE=/var/run/uf896-usb-mode
+LOCKDIR=/var/run/uf896-usb-mode.lock
+LOGTAG=uf896-usb-mode
+
+log() {
+    logger -t "$LOGTAG" "$*"
+    echo "$*" >&2
+}
+
+fail() {
+    log "ERROR: $*"
+    exit 1
+}
+
+get_udc() {
+    local u=""
+    [ -r "$G/UDC" ] && u="$(cat "$G/UDC" 2>/dev/null)"
+    if [ -z "$u" ]; then
+        u="$(ls /sys/class/udc 2>/dev/null | head -n 1)"
+    fi
+    [ -n "$u" ] || fail "No USB device controller found"
+    printf '%s\n' "$u"
+}
+
+get_serial_number() {
+    local cid="" hash=""
+
+    if [ -r /sys/block/mmcblk0/device/cid ]; then
+        cid="$(cat /sys/block/mmcblk0/device/cid 2>/dev/null)"
+        if [ -n "$cid" ]; then
+            hash="$(printf '%s' "$cid" | sha256sum | cut -c1-16)"
+            printf 'UF896%s\n' "$hash"
+            return
+        fi
+    fi
+
+    if [ -s /etc/machine-id ]; then
+        hash="$(sha256sum </etc/machine-id 2>/dev/null | cut -c1-16)"
+        printf 'UF896%s\n' "$hash"
+        return
+    fi
+
+    printf 'UF896%s%s\n' "$(date +%s)" "$(( $$ + 1000 ))"
+}
+
+generate_mac() {
+    local prefix="$1" serial hash b1 b2 b3 b4 b5 b6
+    serial="$(get_serial_number)"
+    hash="$(printf '%s' "${serial}${prefix}" | md5sum | cut -c1-12)"
+    b1="$(printf '%s' "$hash" | cut -c1-2)"
+    b2="$(printf '%s' "$hash" | cut -c3-4)"
+    b3="$(printf '%s' "$hash" | cut -c5-6)"
+    b4="$(printf '%s' "$hash" | cut -c7-8)"
+    b5="$(printf '%s' "$hash" | cut -c9-10)"
+    b6="$(printf '%s' "$hash" | cut -c11-12)"
+    b1="$(printf '%02x' $((0x${b1} & 0xfe | 0x02)))"
+    printf '%s:%s:%s:%s:%s:%s\n' "$b1" "$b2" "$b3" "$b4" "$b5" "$b6"
+}
+
+acquire_lock() {
+    i=0
+    while ! mkdir "$LOCKDIR" 2>/dev/null; do
+        i=$((i + 1))
+        [ "$i" -lt 30 ] || fail "USB mode manager is busy"
+        sleep 1
+    done
+    trap 'rmdir "$LOCKDIR" 2>/dev/null || true' EXIT INT TERM
+}
+
+release_lock() {
+    rmdir "$LOCKDIR" 2>/dev/null || true
+    trap - EXIT INT TERM
+}
+
+wait_profile() {
+    local link="$1" i=0
+    while [ "$i" -lt 20 ]; do
+        [ -L "$link" ] && [ -s "$G/UDC" ] && return 0
+        i=$((i + 1))
+        sleep 1
+    done
+    return 1
+}
+
+wait_ifname() {
+    local file="$1" iface="" i=0
+    while [ "$i" -lt 20 ]; do
+        iface="$(cat "$file" 2>/dev/null)"
+        case "$iface" in
+            ""|"(unnamed net_device)") ;;
+            *) printf '%s\n' "$iface"; return 0 ;;
+        esac
+        i=$((i + 1))
+        sleep 1
+    done
+    return 1
+}
+
+clear_medium() {
+    if [ -e "$M/lun.0/file" ]; then
+        echo "" > "$M/lun.0/file" 2>/dev/null || true
+    fi
+}
+
+remove_cd_function_disconnected() {
+    rm -f "$C/mass_storage.tools" 2>/dev/null || true
+    clear_medium
+    if [ -d "$M" ]; then
+        rmdir "$M" 2>/dev/null || true
+    fi
+}
+
+create_cd_function_disconnected() {
+    local iso_size
+    [ -f "$ISO" ] || fail "Tools ISO not found: $ISO"
+    iso_size="$(wc -c < "$ISO" 2>/dev/null)"
+    [ -n "$iso_size" ] || fail "Cannot determine tools ISO size"
+    [ "$iso_size" -ge "$ISO_MIN_BYTES" ] || fail "Tools ISO is too small for USB CD-ROM: ${iso_size} bytes (minimum ${ISO_MIN_BYTES})"
+
+    remove_cd_function_disconnected
+    mkdir -p "$M" || fail "Cannot create mass-storage function"
+
+    echo 1 > "$M/lun.0/cdrom"
+    echo 1 > "$M/lun.0/ro"
+    echo 1 > "$M/lun.0/removable"
+    echo 0 > "$M/lun.0/nofua"
+    # 8-byte vendor + 16-byte product + 4-byte revision.
+    # Windows should display this as "UF896 TOOLS USB Device".
+    echo "UF896   TOOLS           1.0 " > "$M/lun.0/inquiry_string"
+    echo "$ISO" > "$M/lun.0/file" || fail "Kernel rejected tools ISO backing file"
+}
+
+append_cd_to_normal() {
+    local udc
+
+    wait_profile "$C/ncm.usb0" || fail "Normal NCM gadget is not active"
+    [ -L "$C/acm.GS0" ] || fail "ACM function is not active"
+
+    udc="$(get_udc)"
+    log "Appending tools CD-ROM to normal NCM profile"
+
+    echo "" > "$G/UDC" || fail "Cannot disconnect UDC"
+    create_cd_function_disconnected
+    ln -s "$M" "$C/mass_storage.tools" || fail "Cannot link tools CD-ROM"
+    echo "$udc" > "$G/UDC" || fail "Cannot reconnect UDC"
+
+    echo normal > "$MODEFILE"
+    log "Normal profile active: ACM + NCM + tools CD-ROM"
+}
+
+switch_normal() {
+    log "Rebuilding proven normal NCM profile with stock usb-gadget service"
+
+    clear_medium
+    /etc/init.d/usb-gadget restart || fail "Stock usb-gadget restart failed"
+    wait_profile "$C/ncm.usb0" || fail "NCM did not become active"
+    append_cd_to_normal
+}
+
+switch_legacy() {
+    local udc nif rif
+
+    [ -d "$G" ] || fail "USB gadget does not exist"
+    [ -d "$A" ] || fail "ACM function does not exist"
+
+    udc="$(get_udc)"
+    log "Switching to legacy RNDIS profile"
+
+    echo "" > "$G/UDC" || fail "Cannot disconnect UDC"
+
+    # Remove every function from the active configuration. Function link order
+    # is significant: RNDIS must be linked first for Windows compatibility.
+    rm -f "$C/rndis.usb0" "$C/ncm.usb0" "$C/acm.GS0" "$C/mass_storage.tools" 2>/dev/null || true
+
+    # Release the old NCM netdev so RNDIS can normally reuse usb0. If configfs
+    # refuses to remove it, that is non-fatal: RNDIS may become usb1, which was
+    # also proven to work in testing.
+    if [ -e "$N/ifname" ]; then
+        nif="$(cat "$N/ifname" 2>/dev/null)"
+        case "$nif" in
+            ""|"(unnamed net_device)") ;;
+            *) ip link set dev "$nif" nomaster 2>/dev/null || true ;;
+        esac
+    fi
+    [ -d "$N" ] && rmdir "$N" 2>/dev/null || true
+
+    if [ -d "$R" ]; then
+        rmdir "$R" 2>/dev/null || true
+    fi
+    mkdir -p "$R" || fail "Cannot create RNDIS function"
+
+    echo "$(generate_mac rndis-host)" > "$R/host_addr"
+    echo "$(generate_mac rndis-dev)" > "$R/dev_addr"
+
+    echo 1 > "$G/os_desc/use"
+    echo 0xcd > "$G/os_desc/b_vendor_code"
+    echo MSFT100 > "$G/os_desc/qw_sign"
+    echo RNDIS > "$R/os_desc/interface.rndis/compatible_id"
+    echo 5162001 > "$R/os_desc/interface.rndis/sub_compatible_id"
+    rm -f "$G/os_desc/c.1" 2>/dev/null || true
+    ln -s "$C" "$G/os_desc/c.1" || fail "Cannot link Microsoft OS descriptor"
+
+    create_cd_function_disconnected
+
+    # Critical order: RNDIS FIRST, ACM SECOND, CD-ROM LAST.
+    ln -s "$R" "$C/rndis.usb0" || fail "Cannot link RNDIS first"
+    ln -s "$A" "$C/acm.GS0" || fail "Cannot link ACM"
+    ln -s "$M" "$C/mass_storage.tools" || fail "Cannot link tools CD-ROM"
+
+    echo 0x0102 > "$G/bcdDevice"
+    echo "RNDIS+ACM+TOOLS" > "$C/strings/0x409/configuration"
+    echo "$udc" > "$G/UDC" || fail "Cannot reconnect UDC"
+
+    rif="$(wait_ifname "$R/ifname")" || fail "RNDIS interface did not receive a Linux name"
+    log "RNDIS interface: $rif"
+
+    ip link set dev "$rif" up || fail "Cannot bring RNDIS interface up"
+    ip link set dev "$rif" master br-lan 2>/dev/null || \
+        brctl addif br-lan "$rif" 2>/dev/null || \
+        fail "Cannot attach RNDIS interface to br-lan"
+
+    sleep 2
+    echo legacy > "$MODEFILE"
+    log "Legacy profile active: RNDIS + ACM + tools CD-ROM; carrier=$(cat /sys/class/net/$rif/carrier 2>/dev/null || echo '?')"
+}
+
+remove_cd_only() {
+    local udc
+    [ -d "$G" ] || return 0
+    [ -L "$C/mass_storage.tools" ] || { clear_medium; return 0; }
+
+    udc="$(get_udc)"
+    echo "" > "$G/UDC" 2>/dev/null || true
+    remove_cd_function_disconnected
+    echo "$udc" > "$G/UDC" 2>/dev/null || true
+}
+
+show_status() {
+    echo "UF896 USB add-on status"
+    echo "  gadget: $G"
+    echo "  UDC: $(cat "$G/UDC" 2>/dev/null || echo inactive)"
+    echo "  bcdDevice: $(cat "$G/bcdDevice" 2>/dev/null || echo unknown)"
+
+    if [ -L "$C/rndis.usb0" ]; then
+        echo "  mode: legacy"
+        echo "  RNDIS: $(cat "$R/ifname" 2>/dev/null || echo unknown)"
+    elif [ -L "$C/ncm.usb0" ]; then
+        echo "  mode: normal"
+        echo "  NCM: $(cat "$N/ifname" 2>/dev/null || echo unknown)"
+    else
+        echo "  mode: unknown"
+    fi
+
+    if [ -L "$C/mass_storage.tools" ]; then
+        medium="$(cat "$M/lun.0/file" 2>/dev/null)"
+        [ -n "$medium" ] || medium="<ejected>"
+        echo "  tools CD: $medium"
+    else
+        echo "  tools CD: not linked"
+    fi
+}
+
+run_locked() {
+    acquire_lock
+    "$@"
+    rc=$?
+    release_lock
+    return "$rc"
+}
+
+schedule_mode() {
+    local mode="$1"
+    echo "Scheduling USB switch to $mode mode."
+    echo "The current SSH session may disconnect for several seconds."
+    start-stop-daemon -S -b -x "$0" -- _worker "$mode"
+}
+
+worker() {
+    local mode="$1"
+    sleep 1
+    case "$mode" in
+        normal) run_locked switch_normal ;;
+        legacy) run_locked switch_legacy ;;
+        *) exit 2 ;;
+    esac
+}
+
+case "${1:-}" in
+    normal)
+        schedule_mode normal
+        ;;
+    legacy)
+        schedule_mode legacy
+        ;;
+    normal-now)
+        run_locked switch_normal
+        ;;
+    legacy-now)
+        run_locked switch_legacy
+        ;;
+    overlay-now)
+        run_locked append_cd_to_normal
+        ;;
+    remove-cd-now)
+        run_locked remove_cd_only
+        ;;
+    _worker)
+        worker "$2"
+        ;;
+    status)
+        show_status
+        ;;
+    *)
+        echo "Usage: $0 {normal|legacy|status}"
+        exit 1
+        ;;
+esac
