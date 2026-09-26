@@ -1,128 +1,201 @@
-# OpenWrt for Qualcomm Snapdragon 410 (MSM8916) 4G LTE USB Sticks & Modems
+# OpenWrt для 4G-модемов на Qualcomm Snapdragon 410 (MSM8916)
+
+[Русская версия](#русская-версия) · [English version](#english-version)
+
+<a id="русская-версия"></a>
+
+## 🇷🇺 Русская версия
 
 [![OpenWrt Version](https://img.shields.io/badge/OpenWrt-25.12.5-blue.svg)](https://openwrt.org/)
 [![Kernel](https://img.shields.io/badge/Linux_Kernel-6.12-green.svg)](https://kernel.org/)
 [![Architecture](https://img.shields.io/badge/Arch-aarch64-orange.svg)](https://en.wikipedia.org/wiki/AArch64)
 [![License](https://img.shields.io/badge/License-GPL--2.0-lightgrey.svg)](LICENSE)
 
-A production-ready, fully open-source OpenWrt port for Qualcomm Snapdragon 410 (MSM8916 / MSM8939) based 4G LTE USB modems, dongles, and pocket routers.
+Это форк OpenWrt для USB-модемов, донглов и карманных маршрутизаторов на Qualcomm Snapdragon 410 / MSM8916 (и близких MSM8939), с основной текущей разработкой и аппаратным тестированием на **THWC UF896**.
 
-Features modern **Linux 6.12 mainline kernel**, **ModemManager 1.24**, **Qualcomm WCN36xx Wi-Fi**, **USB ConfigFS CDC NCM/ACM**, **true persistent eMMC EXT4 overlay storage**, and working **reboot-to-EDL and reboot-to-Fastboot recovery paths**.
+### 🎯 Для какого оборудования сделаны текущие доработки
 
----
+Основная активная ветка этого форка — [`thwc-uf896-openwrt-25.12`](https://github.com/sonooby/msm8916-openwrt/tree/thwc-uf896-openwrt-25.12). Все новые USB-функции, описанные ниже, разрабатывались и проверялись на реальном устройстве:
 
-## 🚀 Key Features
+- **Модель:** THWC UF896 4G Modem Stick
+- **Board ID:** `thwc,uf896`
+- **Профиль OpenWrt:** `thwc-uf896`
+- **SoC:** Qualcomm MSM8916 / Snapdragon 410, ARM64
+- **ОЗУ тестового устройства:** 512 МБ
+- **Основной LAN через USB:** `192.168.8.1/24`
+- **OpenWrt:** 25.12.5
+- **Ядро:** Linux 6.12
 
-* **⚡ Plug-and-Play USB Networking**: High-speed **CDC NCM Ethernet** automatically bound to `br-lan` at `192.168.8.1/24` with a built-in DHCP server (avoids `192.168.1.x` subnet collisions with upstream home routers).
-* **📟 Built-in USB Serial Console**: Instant root shell on `/dev/ttyACM0` (115200 baud) over USB via CDC ACM for zero-setup terminal access, debugging, and recovery.
-* **📶 First-Boot Wi-Fi Auto-Start**: Automatically extracts Qualcomm WCNSS blobs, starts the remoteproc in-place, binds the physical radio path, and broadcasts an open `OpenWrt` 2.4 GHz AP (Channel 1, 2.412 GHz) on clean first boot.
-* **🌐 4G LTE Cellular Data & Carrier Auto-Provisioning**: Native **ModemManager** integration with automatic SIM carrier detection (`qcom-carrier-autocfg`), dynamic APN and Qualcomm Carrier MBN deployment, safe empty PLMN home operator attachment, and continuous self-healing daemon monitoring (`modem-led-monitor`).
-* **💾 Permanent eMMC Storage**: Automated `/dev/mmcblk0p15` (`rootfs_data`) EXT4 formatting and mounting, with preinit filesystem checking and automatic safe repair using `e2fsck -p`, providing persistent overlay storage without unnecessarily formatting an existing filesystem.
-* **💡 Intuitive Hardware Status LEDs**:
+> [!IMPORTANT]
+> **ZeroCD, автоматическое переключение NCM → RNDIS, стабильный USB serial и Windows-совместимость проверены именно на THWC UF896.** В репозитории остаются профили HMU05, UFI001B, UZ801 и UF02, но текущая ветка ориентирована прежде всего на UF896 и изменения на остальных платах не проходили такой же полный регрессионный цикл.
 
-  * 🟢 **Green LED** (`green:wlan`): Wi-Fi AP state and wireless client transmission.
-  * 🔵 **Blue LED** (`blue:wan`): 4G LTE registration, data bearer, and internet activity.
-  * 🔴 **Red LED** (`red:power`): Modem processor and subsystem health indicator.
-* **🔄 Bulletproof Sysupgrade**: Graceful pre-upgrade service teardown (`platform_pre_upgrade`) eliminates kernel linked-list panics during LuCI web and CLI firmware upgrades, backed by step-by-step diagnostic logging to stdout and `/dev/kmsg`.
-* **🛡️ HMU05 No-Sleep Fix**: Hardware-guarded native C patcher (`hmu05-patch-modem`) prevents Qualcomm Hexagon DSP 15-minute sleep stalls (`FUN_c03987e0` / `ERR_FATAL` bypass) with embedded SHA-256 header recalculation.
-* **🚑 Reboot to Qualcomm EDL**: `reboot-edl` cleanly triggers Qualcomm Emergency Download (EDL / USB `05c6:9008`) mode without requiring hardware test-point access.
-* **⚙️ Reboot to Fastboot**: `reboot-fastboot` switches the device into Qualcomm Fastboot mode for bootloader-level recovery and flashing.
-* **🔧 Recovery Without Physical Access**: EDL and Fastboot reboot targets provide software-triggered recovery paths directly from a running OpenWrt system.
+Проект использует современное ядро Linux 6.12, ModemManager, Qualcomm WCN36xx Wi-Fi, USB ConfigFS, постоянный EXT4 overlay на eMMC и программные пути восстановления через EDL/Fastboot.
 
 ---
 
-## 📟 Supported Devices
+## 🚀 Основные возможности
 
-| Board Target  | Profile Name      | Device Model               | SoC     | RAM    | Storage   | Features                                                                                |
-| :------------ | :---------------- | :------------------------- | :------ | :----- | :-------- | :-------------------------------------------------------------------------------------- |
-| **`hmu05`**   | `generic-hmu05`   | Generic HMU05 (250605 V0S) | MSM8916 | 512 MB | 4 GB eMMC | USB NCM, ACM, Wi-Fi AP, LTE, No-Sleep Patch, Ramoops, Reboot-to-EDL, Reboot-to-Fastboot |
-| **`ufi001b`** | `generic-ufi001b` | Generic UFI001B 4G Stick   | MSM8916 | 512 MB | 4 GB eMMC | USB NCM, ACM, Wi-Fi AP, LTE, Reboot-to-EDL, Reboot-to-Fastboot, Ramoops                 |
-| **`uz801`**   | `yiming-uz801v3`  | YiMing UZ801 v3 Dongle     | MSM8916 | 512 MB | 4 GB eMMC | USB NCM, ACM, Wi-Fi AP, LTE, Reboot-to-EDL, Reboot-to-Fastboot, Swapped LED mapping     |
-| **`uf02`**    | `generic-uf02`    | Generic UF02 / UF2 Stick   | MSM8916 | 512 MB | 4 GB eMMC | USB NCM, ACM, Wi-Fi AP, LTE, Reboot-to-EDL, Reboot-to-Fastboot                          |
+- **⚡ USB-сеть без ручной установки драйверов на современных Windows:** CDC NCM подключается к `br-lan`, устройство доступно по `192.168.8.1`, DHCP работает на модеме.
+- **🪟 Автопривязка Microsoft UsbNcm:** для UF896 добавлен Microsoft OS descriptor `WINNCM`, поэтому Windows 10/11 автоматически использует штатный `UsbNcm Host Device` без ручного выбора INF через «Диспетчер устройств».
+- **💿 ZeroCD как у классических USB-модемов:** UF896 экспортирует read-only CD-ROM `UF896_TOOLS` вместе с NCM и ACM.
+- **🔁 Legacy RNDIS по команде Eject:** если в Windows нажать **«Извлечь»** для `UF896_TOOLS`, модем автоматически перестраивает USB gadget и переходит в профиль **RNDIS + ACM + CD-ROM**. RNDIS создаётся первым интерфейсом, что необходимо для корректного запуска штатного драйвера Windows.
+- **↩️ Возврат в обычный режим:** команда `uf896-usb-mode normal` возвращает **NCM + ACM + CD-ROM**. После обычной перезагрузки UF896 всегда стартует в NORMAL/NCM.
+- **🆔 Стабильный USB serial:** серийный номер формируется детерминированно из eMMC CID. Windows больше не создаёт новые экземпляры сетевого адаптера и COM-порта после каждого перезапуска USB gadget.
+- **🔗 Стабильные MAC-адреса:** MAC для NCM/RNDIS генерируются детерминированно из стабильного серийного номера устройства.
+- **📟 USB Serial Console:** CDC ACM предоставляет консоль `/dev/ttyGS0`; на Windows появляется стабильный COM-порт.
+- **📶 Wi-Fi при первом запуске:** WCN36xx поднимается как точка доступа `OpenWrt` 2.4 ГГц на поддерживаемых платах.
+- **🌐 4G LTE и ModemManager:** обнаружение SIM, APN и MBN-профилей операторов через `qcom-carrier-autocfg`.
+- **💾 Постоянный eMMC overlay:** `rootfs_data` используется как EXT4 overlay с проверкой и безопасным восстановлением `e2fsck -p`.
+- **💡 Аппаратные индикаторы:** поддержка LED для Wi-Fi, LTE/интернета и состояния подсистем на поддерживаемых платах.
+- **🔄 Sysupgrade:** перед обновлением выполняется корректное завершение сервисов/подсистем для снижения риска kernel panic.
+- **🛡️ HMU05 No-Sleep Fix:** отдельный аппаратно-ограниченный патч для HMU05 предотвращает известное зависание Hexagon DSP после перехода в сон.
+- **🚑 Reboot to EDL:** `reboot-edl` переводит устройство в Qualcomm EDL (`05c6:9008`).
+- **⚙️ Reboot to Fastboot:** `reboot-fastboot` переводит поддерживаемое устройство в Fastboot.
 
 ---
 
-## 🔄 Recovery and Reboot Modes
+## 🔌 USB-режимы THWC UF896
 
-OpenWrt provides software-triggered reboot paths for Qualcomm recovery modes.
+### NORMAL — режим по умолчанию
 
-### Reboot to EDL
+После загрузки UF896 работает как составное USB-устройство:
 
-From an SSH shell or USB serial console:
+```text
+ACM + NCM + UF896_TOOLS CD-ROM
+bcdDevice 0x0101
+LAN 192.168.8.1/24
+```
+
+На Windows 10/11 ожидаются:
+
+```text
+UsbNcm Host Device
+USB Serial / COM
+UF896 TOOLS USB Device
+```
+
+CD-ROM содержит документацию/служебные файлы и доступен только для чтения.
+
+### LEGACY — RNDIS для старых Windows
+
+В Проводнике Windows выберите для `UF896_TOOLS` **«Извлечь»**. Watcher определяет извлечение носителя и автоматически выполняет:
+
+```text
+NORMAL: ACM + NCM + CD-ROM
+            ↓ Eject
+LEGACY: RNDIS + ACM + CD-ROM
+```
+
+В Legacy-профиле:
+
+```text
+RNDIS — первый USB interface
+bcdDevice 0x0102
+DHCP/Gateway/DNS: 192.168.8.1
+```
+
+После переключения CD-ROM снова вставляется автоматически. Проверенный результат на Windows — штатный `Remote NDIS Compatible Device`, DHCP-адрес `192.168.8.x` и рабочий доступ к `192.168.8.1`.
+
+Вернуться в NCM можно из OpenWrt:
+
+```bash
+uf896-usb-mode normal
+```
+
+Состояние USB-режима и ZeroCD:
+
+```bash
+uf896-zerocd status
+uf896-usb-mode status
+```
+
+После перезагрузки устройство всегда начинает работу в NORMAL/NCM.
+
+---
+
+## 📟 Поддерживаемые устройства
+
+| Board target | Профиль | Модель | SoC | ОЗУ | Основные возможности |
+| :-- | :-- | :-- | :-- | :-- | :-- |
+| **`thwc,uf896`** | **`thwc-uf896`** | **THWC UF896 4G Modem Stick** | MSM8916 | 512 МБ (тестовое устройство) | **NCM/ACM, WINNCM, ZeroCD, Eject→RNDIS, стабильный serial/MAC, Wi-Fi, LTE** |
+| `hmu05` | `generic-hmu05` | Generic HMU05 (250605 V0S) | MSM8916 | 512 МБ | NCM, ACM, Wi-Fi, LTE, No-Sleep Patch, Ramoops, EDL/Fastboot |
+| `ufi001b` | `generic-ufi001b` | Generic UFI001B | MSM8916 | 512 МБ | NCM, ACM, Wi-Fi, LTE, EDL/Fastboot, Ramoops |
+| `uz801` | `yiming-uz801v3` | YiMing UZ801 v3 | MSM8916 | 512 МБ | NCM, ACM, Wi-Fi, LTE, EDL/Fastboot, изменённая разводка LED |
+| `uf02` | `generic-uf02` | Generic UF02 / UF2 | MSM8916 | 512 МБ | NCM, ACM, Wi-Fi, LTE, EDL/Fastboot |
+
+> [!WARNING]
+> Не прошивайте UF896 загрузчиком, `firmware.zip` или образом, предназначенным для HMU05/UFI001B/UZ801/UF02. Профиль `thwc-uf896` специально отделён от generic-профилей. В текущей ветке generic firmware bundle/flasher для UF896 намеренно не публикуется, чтобы исключить применение несовместимого bootloader payload.
+
+---
+
+## 🔄 Режимы восстановления
+
+### Перезагрузка в EDL
+
+Из SSH или USB-консоли:
 
 ```bash
 reboot-edl
 ```
 
-The device reboots directly into **Qualcomm Emergency Download (EDL) mode**.
-
-On the host, verify that the Qualcomm EDL USB device is detected:
-
-```bash
-lsusb | grep 05c6:9008
-```
-
-Expected USB identification:
+Хост должен увидеть:
 
 ```text
 05c6:9008 Qualcomm HS-USB QDLoader 9008
 ```
 
-This allows the device to be recovered or reflashed using Qualcomm EDL tools such as `edl` or `qdl`.
+Проверка в Linux:
 
-### Reboot to Fastboot
+```bash
+lsusb | grep 05c6:9008
+```
 
-From OpenWrt:
+EDL позволяет выполнять низкоуровневое восстановление через `edl`/`qdl`.
+
+### Перезагрузка в Fastboot
 
 ```bash
 reboot-fastboot
 ```
 
-The device reboots into **Fastboot mode**, allowing bootloader-level operations from the host.
-
-Verify the device from the host with:
+Проверка:
 
 ```bash
 fastboot devices
 ```
 
-### Android/ADB EDL
+### Android / ADB → EDL
 
-Where ADB is available, the standard Android command can also be used:
+Если на исходной системе доступен ADB:
 
 ```bash
 adb reboot edl
 ```
 
-The OpenWrt-specific `reboot-edl` command is useful when the device is already running OpenWrt and ADB is not present.
-
 ---
 
-## ⚡ Flashing Firmware to Device
+## ⚡ Прошивка
 
-### 1. Putting the Device into Qualcomm EDL Mode (`05c6:9008`)
+### 1. Вход в Qualcomm EDL (`05c6:9008`)
 
-Put the USB modem into **Qualcomm Emergency Download (EDL) Mode** using any of the following methods:
-* Short the hardware **EDL test points** while plugging the stick into a USB port.
-* From Android shell (where ADB is available): `adb reboot edl`
-* From OpenWrt shell: `reboot-edl`
+Возможные способы:
 
-Verify that the host detects the device in Qualcomm EDL mode:
+- аппаратные EDL test points при подключении USB;
+- `adb reboot edl` из Android;
+- `reboot-edl` из OpenWrt.
+
+Проверка:
 
 ```bash
 lsusb | grep 05c6:9008
-# Expected: 05c6:9008 Qualcomm HS-USB QDLoader 9008
 ```
 
----
-
-### Scenario A: Migrating from Stock Android to OpenWrt (Mandatory First-Time Flash Script)
+### Сценарий A: первый переход со штатного Android на OpenWrt
 
 > [!CAUTION]
-> **Do NOT directly flash individual boot and rootfs partitions when migrating from stock Android.**
-> Stock Android devices have a completely different partition table (GPT) layout, different bootloader/firmware partitions, and critical radio/calibration data (`fsc`, `fsg`, `modemst1`, `modemst2`, `modem`, `persist`, `sec`) that must be preserved. Directly flashing OpenWrt partitions over stock Android will cause bootloops, soft bricks, or permanent loss of IMEI, MAC addresses, and RF calibration.
+> **Не записывайте вслепую отдельные boot/rootfs или загрузочные разделы от другой модели.** На заводской Android-разметке находятся уникальные данные радиотракта и калибровок: `fsc`, `fsg`, `modemst1`, `modemst2`, `modem`, `persist`, `sec`. Их потеря может привести к утрате IMEI, MAC, RF-калибровок или полной неработоспособности модема.
 
-To migrate from stock Android to OpenWrt safely, you **MUST** use the automated flash script generated during compilation in `openwrt/bin/targets/msm89xx/msm8916/`:
+Для generic-профилей, где сборка создаёт штатный `*-flash.sh`, используется сгенерированный скрипт из `openwrt/bin/targets/msm89xx/msm8916/`:
 
 ```bash
 cd openwrt/bin/targets/msm89xx/msm8916/
@@ -130,76 +203,50 @@ chmod +x openwrt-msm89xx-msm8916-<board>-flash.sh
 ./openwrt-msm89xx-msm8916-<board>-flash.sh
 ```
 
-#### What the Script Automatically Handles:
+Он выполняет резервное копирование критичных разделов, перестройку GPT, запись firmware/boot/rootfs, восстановление калибровок и перезагрузку.
 
-* **Safety Backup**: Backs up all critical device-unique radio/calibration partitions (`fsc`, `fsg`, `modemst1`, `modemst2`, `modem`, `persist`, `sec`) into a local `saved/` directory.
-* **GPT Repartitioning**: Flashes the OpenWrt partition table (`*-squashfs-gpt_both0.bin`) via raw sector writes (`primary.bin`, `backup_entries.bin`, `backup_header.bin`) to repartition the eMMC safely.
-* **Firmware Extraction & Flashing**: Extracts `aboot.mbn`, `hyp.mbn`, `rpm.mbn`, `sbl1.mbn`, and `tz.mbn` from the board's `*-firmware.zip` and flashes them to the newly repartitioned layout.
-* **OpenWrt Installation**: Flashes the OpenWrt kernel/boot image (`*-squashfs-boot.img`), the rootfs system image (`*-squashfs-system.img`), and safely erases `rootfs_data`.
-* **Partition Restoration**: Restores all previously backed-up calibration and radio partitions back to the device.
-* **Automatic Reboot**: Reboots the device straight into OpenWrt (`edl reset`).
+> [!IMPORTANT]
+> **Для THWC UF896 этот generic-сценарий не применяется автоматически.** Профиль `thwc-uf896` намеренно не публикует generic `firmware.zip`/`flash.sh`, потому что bootloader payload от других MSM8916-плат не считается безопасным для UF896. Используйте только UF896-специфичный, проверенный порядок установки и образы из ветки/релиза, предназначенные именно для `thwc-uf896`.
 
----
+### Сценарий B: обновление уже установленного OpenWrt
 
-### Scenario B: Updating or Re-Flashing an Existing OpenWrt Device
+Предпочтительный путь — штатный `sysupgrade`, сохраняющий конфигурацию и overlay.
 
-If your device is already running OpenWrt and has already been repartitioned to the OpenWrt GPT layout:
-
-* **Recommended (Sysupgrade)**: Use the standard sysupgrade path to preserve configuration (see [Sysupgrade](#-sysupgrade)).
-* **Clean Re-flash via EDL**: If you need a clean re-flash via EDL without modifying the existing OpenWrt partition table:
-
-```bash
-# Flash kernel boot and rootfs partitions
-edl w boot openwrt/bin/targets/msm89xx/msm8916/openwrt-msm89xx-msm8916-<board>-squashfs-boot.img
-edl w rootfs openwrt/bin/targets/msm89xx/msm8916/openwrt-msm89xx-msm8916-<board>-squashfs-system.img
-
-# Optional: erase persistent overlay to start completely clean
-edl e rootfs_data
-
-# Reboot the device
-edl reset
-```
+При чистом восстановлении уже подготовленного устройства через EDL допускается запись только тех разделов, которые соответствуют конкретной плате и текущей GPT. Не переносите bootloader/NV-разделы между моделями.
 
 ---
 
-## 🔧 Fastboot Recovery
+## 🔧 Fastboot recovery
 
-If the device is already running OpenWrt and supports the software Fastboot reboot:
+Если загрузчик конкретной платы поддерживает Fastboot:
 
 ```bash
 reboot-fastboot
-```
-
-Then verify the device:
-
-```bash
 fastboot devices
 ```
 
-Fastboot can be used for bootloader-level recovery operations where supported by the device's bootloader.
+Fastboot предназначен для загрузочных/восстановительных операций и не заменяет резервное копирование уникальных Qualcomm NV/калибровочных разделов.
 
 ---
 
 ## 🔄 Sysupgrade
 
-The OpenWrt sysupgrade path preserves the persistent `rootfs_data` overlay.
+`sysupgrade` сохраняет постоянный `rootfs_data` overlay. Перед обновлением платформенный код корректно завершает сервисы и подсистемы.
 
-Before upgrading, the platform code performs the required service/subsystem teardown to avoid the previously observed reboot/kernel issues.
-
-After flashing a new sysupgrade image, the persistent `/overlay` filesystem remains available:
+Проверка overlay:
 
 ```bash
 mount | grep overlay
 ```
 
-Expected:
+Ожидаемый вид:
 
 ```text
 /dev/mmcblk0p15 on /overlay type ext4 (rw,noatime)
 overlayfs:/overlay on / type overlay (...)
 ```
 
-The preinit filesystem check verifies the EXT filesystem before `mount_root`:
+Перед `mount_root` выполняется проверка EXT:
 
 ```text
 rootfs_data: ext filesystem detected
@@ -208,62 +255,49 @@ rootfs_data: filesystem errors repaired
 mount_root: switching to ext4 overlay
 ```
 
-An existing EXT filesystem is **not reformatted merely because it requires repair**. A new EXT4 filesystem is created only when no existing EXT filesystem is detected.
+Существующая EXT4 не форматируется только из-за найденных исправимых ошибок; новая файловая система создаётся только если подходящая EXT не обнаружена.
 
 ---
 
-## 🔌 Default Device Access
+## 🔌 Доступ к устройству по умолчанию
 
-| Service                  | Access Details                  | Default Credentials              |
-| :----------------------- | :------------------------------ | :------------------------------- |
-| **Web Interface (LuCI)** | `http://192.168.8.1`            | No password (set on first login) |
-| **Connectivity Watchdog**| LuCI: **Services $\to$ Watchcat**| Configurable auto-reboot watchdog|
-| **SMS Management**       | LuCI: **Services $\to$ SMS**    | View / Send SMS via Web UI       |
-| **SSH Terminal**         | `ssh root@192.168.8.1`          | No password required             |
-| **USB Serial Console**   | `screen /dev/ttyACM0 115200`    | Direct root shell                |
-| **Wi-Fi Access Point**   | SSID: `OpenWrt` (2.4 GHz, Ch 1) | Open (No encryption by default)  |
-| **EDL Recovery**         | `reboot-edl`                    | Qualcomm USB `05c6:9008`         |
-| **Fastboot Recovery**    | `reboot-fastboot`               | `fastboot devices`               |
+| Сервис | Доступ | По умолчанию |
+| :-- | :-- | :-- |
+| **LuCI** | `http://192.168.8.1` | пароль root необходимо задать |
+| **SSH** | `ssh root@192.168.8.1` | на чистой сборке пароль может быть пустым — **задайте `passwd`** |
+| **USB Serial Console** | `/dev/ttyACM0` / COM | консоль root через ACM |
+| **USB Ethernet (UF896 NORMAL)** | CDC NCM | `192.168.8.1/24`, DHCP |
+| **USB Ethernet (UF896 LEGACY)** | RNDIS | `192.168.8.1/24`, DHCP |
+| **UF896 Tools CD** | `UF896_TOOLS` | read-only CD-ROM |
+| **Wi-Fi AP** | SSID `OpenWrt`, 2.4 ГГц | на чистой конфигурации может быть открыт |
+| **EDL** | `reboot-edl` | Qualcomm USB `05c6:9008` |
+| **Fastboot** | `reboot-fastboot` | `fastboot devices` |
+
+> [!WARNING]
+> После первого запуска обязательно задайте пароль root командой `passwd` и настройте защиту Wi-Fi перед эксплуатацией в недоверенной сети.
 
 ---
 
-## 📶 SIM Detection, Carrier Auto-Provisioning & Reboot Behavior
+## 📶 SIM, автоподбор оператора и перезагрузка
 
-When you plug in the modem stick with a SIM card inserted (or after swapping to a different cellular carrier), the stick will **automatically reboot once** after approximately 10–15 seconds of uptime.
+После установки SIM `qcom-carrier-autocfg` определяет MCC-MNC/IMSI через ModemManager, выбирает APN и при необходимости Qualcomm Carrier MBN (`mcfg_sw.mbn`).
 
-> [!NOTE]
-> **This one-time reboot is intentional, expected behavior—not a crash, panic, or bootloop.**
+Если требуемый MBN отличается от установленного, система синхронизирует файловые системы и выполняет **однократную автоматическую перезагрузку**, чтобы Hexagon DSP загрузил новый профиль. Это ожидаемое поведение, а не bootloop.
 
-### Why Does the Stick Reboot?
+После перезагрузки совпадающий MBN повторно не заменяется, поэтому дополнительных перезапусков не требуется; ModemManager создаёт LTE bearer с подходящим APN/IP-стеком.
 
-1. **Qualcomm Carrier MBN (`mcfg_sw.mbn`) Architecture**:
-   Qualcomm Snapdragon 410 (MSM8916) modem baseband firmware runs a universal cellular binary (`MPSS.DPM.1.0`). Network-specific parameters—such as LTE Radio Resource Control (RRC) band priority matrices, Discontinuous Reception (DRX) paging timers, IMS/VoLTE profiles, and Evolved Packet Core (EPC) attach parameters—are packaged into signed Qualcomm **Carrier MBN files** (`mcfg_sw.mbn`).
-2. **Boot-Time Modem Firmware Initialization**:
-   The Qualcomm Hexagon QDSP6 v5 modem processor (`remoteproc0`) reads and loads `/lib/firmware/MCFG_SW.MBN` into baseband memory only during its low-level bootloader initialization phase. Mainline Linux kernel `remoteproc` does not support hot-reloading carrier MBN profiles into the running Hexagon DSP without restarting the subsystem.
-3. **Automated Provisioning (`qcom-carrier-autocfg`)**:
-   Upon detecting the SIM card's IMSI and MCC-MNC operator code via ModemManager, the background `carrier-autocfg` daemon matches the carrier profile against its APN and MBN database:
-   * If the currently deployed `/lib/firmware/MCFG_SW.MBN` does not match the optimal MBN profile for the detected carrier (e.g., on clean first boot or when switching between carriers such as Reliance Jio, Airtel, or ROW default), the daemon installs the matching `mcfg_sw.mbn` into `/lib/firmware/MCFG_SW.MBN`.
-   * It then safely syncs filesystems to eMMC and triggers an **automatic, one-time system reboot** (with a 3-second grace countdown) to allow the Hexagon DSP to initialize with the new carrier baseband configuration.
+При hot-swap SIM:
 
-### What Happens After the Reboot (Steady State)?
+- тот же MBN/совместимое семейство — подключение обычно восстанавливается без reboot;
+- другое MBN-семейство — возможна однократная перезагрузка для загрузки нового профиля.
 
-* **No Further Reboots**: On the subsequent boot, `carrier-autocfg` inspects the SIM and compares the active `/lib/firmware/MCFG_SW.MBN` against the detected carrier profile. Because the file already matches (`cmp -s`), **no reboot occurs**.
-* **Automatic Data Attachment**: The daemon automatically configures `/etc/config/network` with the carrier's APN and IP stack (IPv4/IPv6), verifies clock synchronization with the Qualcomm QMI Time Daemon (`qcom-time-daemon`), and commands ModemManager to connect the 4G LTE bearer. The blue WAN LED lights up to indicate active cellular internet.
-
-### SIM Hot-Swapping Behavior
-
-* **Same Carrier / Same MBN Family**: If you insert a different SIM that uses the same carrier profile (or compatible ROW profile), `carrier-autocfg` flushes the baseband radio cache and network bearer dynamically—restoring data connectivity **without rebooting**.
-* **Different Carrier Family**: If you swap to a SIM that requires a different carrier MBN (e.g., swapping between Reliance Jio and Airtel/ROW), the device will perform a one-time reboot to reload the new baseband profile into the Hexagon DSP.
-
-### Monitoring Auto-Provisioning in Real Time
-
-You can observe carrier detection, profile matching, and MBN provisioning live via SSH or USB serial console (`/dev/ttyACM0`):
+Мониторинг:
 
 ```bash
 logread -f -e carrier-autocfg
 ```
 
-**Example Log Output on Initial SIM Detection:**
+Пример первого определения оператора:
 
 ```text
 [carrier-autocfg] Started MSM8916 SIM Carrier Auto-Provisioning Engine
@@ -272,39 +306,39 @@ logread -f -e carrier-autocfg
 [carrier-autocfg] Carrier MBN radio firmware updated for 'Reliance Jio'. Scheduling automatic reboot in 3 seconds to initialize Hexagon DSP...
 ```
 
-**Example Log Output After Reboot (Steady State):**
+После перезагрузки:
 
 ```text
-[carrier-autocfg] Matched carrier in global APN database for MCC-MNC 405861
 [carrier-autocfg] Active Carrier MBN already matches generic/apac/reliance/commerci/mcfg_sw.mbn.
 [carrier-autocfg] Boot-time carrier provisioning completed successfully. No reboot required.
-[carrier-autocfg] [QMI-TIME] Modem ATS_USER time sync verified before LTE attach.
 [carrier-autocfg] Requesting ModemManager bearer connection for APN 'jionet' (ipv4v6)...
 ```
 
 ---
 
-## 📂 Partition Layout (eMMC /dev/mmcblk0)
+## 📂 Разметка eMMC
 
-| Partition    | Label               | Size     | Type     | Purpose                                                              |
-| :----------- | :------------------ | :------- | :------- | :------------------------------------------------------------------- |
-| `p1` / `p3`  | `modem`             | ~64 MB   | VFAT     | Stock Qualcomm modem & WCNSS firmware blobs                          |
-| `p6` / `p24` | `persist`           | ~32 MB   | EXT4     | Factory calibration and Wi-Fi NVRAM (`WCNSS_qcom_wlan_nv.bin`)       |
-| `p13`        | `boot`              | ~32 MB   | Raw      | OpenWrt Linux 6.12 kernel + DTB (`boot.img`)                         |
-| `p14`        | `system` / `rootfs` | ~1.5 GB  | SquashFS | OpenWrt read-only root filesystem (`system.img`)                     |
-| `p15`        | `rootfs_data`       | ~1.5 GB+ | EXT4     | Writable persistent overlay storage (configurations, packages, logs) |
+Разметка зависит от профиля/ёмкости eMMC; типовой OpenWrt layout содержит:
+
+| Раздел | Метка | Тип | Назначение |
+| :-- | :-- | :-- | :-- |
+| `modem` | `modem` | VFAT/raw | Qualcomm modem/WCNSS firmware |
+| `persist` | `persist` | EXT4 | заводские калибровки, Wi-Fi NVRAM |
+| `boot` | `boot` | Raw | ядро Linux + DTB |
+| `rootfs` | `system/rootfs` | SquashFS | read-only OpenWrt rootfs |
+| `rootfs_data` | `rootfs_data` | EXT4 | постоянный writable overlay |
+
+Номера и размеры разделов необходимо сверять с конкретной платой и её GPT; не переносите таблицу разделов между разными аппаратными вариантами без проверки.
 
 ---
 
-## 📦 Official Package & Kernel Driver Repository
+## 📦 Репозиторий пакетов и драйверов
 
-This repository hosts a live APK feed on GitHub Pages with all pre-compiled Qualcomm MSM8916 kernel modules (`kmod-*`) and applications:
+Проект использует APK feeds для OpenWrt 25.12.5. Landing page:
 
-### Repository Feeds URL
+https://akbar-npj.github.io/msm8916-openwrt/
 
-* **Landing Page**: https://akbar-npj.github.io/msm8916-openwrt/
-
-### Enable Custom Feeds on Device
+Пример подключения feed:
 
 ```bash
 cat << 'EOF' > /etc/apk/repositories.d/customfeeds.list
@@ -314,13 +348,364 @@ EOF
 apk update
 ```
 
-### Install Extra Drivers & Packages
+Примеры:
 
 ```bash
-# Install USB Ethernet driver
 apk add kmod-usb-net-rtl8152
+apk add luci-app-wireguard
+```
 
-# Install WireGuard VPN
+---
+
+## 📜 Лицензия
+
+Проект распространяется по **GNU General Public License v2.0 (GPL-2.0)**. Компоненты Qualcomm firmware dumper используют BSD-3-Clause.
+
+---
+
+<a id="english-version"></a>
+
+# 🇬🇧 English version — OpenWrt for Qualcomm Snapdragon 410 (MSM8916) 4G LTE USB Sticks & Modems
+
+[![OpenWrt Version](https://img.shields.io/badge/OpenWrt-25.12.5-blue.svg)](https://openwrt.org/)
+[![Kernel](https://img.shields.io/badge/Linux_Kernel-6.12-green.svg)](https://kernel.org/)
+[![Architecture](https://img.shields.io/badge/Arch-aarch64-orange.svg)](https://en.wikipedia.org/wiki/AArch64)
+[![License](https://img.shields.io/badge/License-GPL--2.0-lightgrey.svg)](LICENSE)
+
+This fork provides OpenWrt for Qualcomm Snapdragon 410 / MSM8916 (and related MSM8939) USB modems, dongles and pocket routers. The current development focus and full hardware validation are on **THWC UF896**.
+
+## 🎯 Hardware targeted by the current work
+
+The active hardware branch is [`thwc-uf896-openwrt-25.12`](https://github.com/sonooby/msm8916-openwrt/tree/thwc-uf896-openwrt-25.12). The new USB functionality described below was developed and tested on a physical:
+
+- **Model:** THWC UF896 4G Modem Stick
+- **Board ID:** `thwc,uf896`
+- **OpenWrt profile:** `thwc-uf896`
+- **SoC:** Qualcomm MSM8916 / Snapdragon 410, ARM64
+- **RAM on the tested unit:** 512 MB
+- **USB LAN:** `192.168.8.1/24`
+- **OpenWrt:** 25.12.5
+- **Kernel:** Linux 6.12
+
+> [!IMPORTANT]
+> **ZeroCD, automatic NCM → RNDIS switching, stable USB serial handling and Windows compatibility have been fully tested on THWC UF896.** HMU05, UFI001B, UZ801 and UF02 profiles remain in the repository, but this branch is UF896-focused and those boards have not received the same regression testing for the new USB layer.
+
+The project includes Linux 6.12, ModemManager, Qualcomm WCN36xx Wi-Fi, USB ConfigFS, persistent EXT4 eMMC overlay storage and software-triggered EDL/Fastboot recovery paths.
+
+---
+
+## 🚀 Key Features
+
+- **⚡ Plug-and-Play USB Networking:** CDC NCM is attached to `br-lan` and served at `192.168.8.1/24` with DHCP.
+- **🪟 Microsoft UsbNcm auto-binding:** UF896 exposes the Microsoft OS descriptor `WINNCM`, allowing Windows 10/11 to bind the inbox `UsbNcm Host Device` driver without manual INF selection.
+- **💿 ZeroCD:** UF896 exposes a read-only `UF896_TOOLS` CD-ROM together with NCM and ACM, similar to classic USB cellular modems.
+- **🔁 Eject-to-Legacy RNDIS:** choosing **Eject** for `UF896_TOOLS` in Windows automatically rebuilds the composite gadget as **RNDIS + ACM + CD-ROM**. RNDIS is intentionally the first USB function for Windows compatibility.
+- **↩️ Return to normal:** `uf896-usb-mode normal` restores **NCM + ACM + CD-ROM**. A normal reboot always starts UF896 in NORMAL/NCM mode.
+- **🆔 Stable USB serial:** the device serial is derived deterministically from the eMMC CID so Windows no longer creates a new network/COM instance after each gadget restart.
+- **🔗 Stable MAC addresses:** NCM/RNDIS MAC addresses are deterministically derived from the stable device identity.
+- **📟 USB Serial Console:** CDC ACM exposes `/dev/ttyGS0` and a stable host COM/ttyACM port.
+- **📶 First-Boot Wi-Fi Auto-Start:** Qualcomm WCN36xx support provides an `OpenWrt` 2.4 GHz AP on supported boards.
+- **🌐 4G LTE + ModemManager:** SIM/carrier detection, APN selection and Qualcomm Carrier MBN handling through `qcom-carrier-autocfg`.
+- **💾 Persistent eMMC Storage:** EXT4 `rootfs_data` overlay with preinit checking and `e2fsck -p` repair.
+- **💡 Hardware Status LEDs:** Wi-Fi/LTE/subsystem LED handling on supported boards.
+- **🔄 Safer Sysupgrade:** graceful service/subsystem teardown before upgrade.
+- **🛡️ HMU05 No-Sleep Fix:** hardware-gated Hexagon DSP sleep-stall workaround for HMU05.
+- **🚑 Reboot to Qualcomm EDL:** `reboot-edl` enters USB `05c6:9008` recovery mode.
+- **⚙️ Reboot to Fastboot:** `reboot-fastboot` enters Fastboot where supported.
+
+---
+
+## 🔌 THWC UF896 USB modes
+
+### NORMAL — default mode
+
+After boot, UF896 enumerates as:
+
+```text
+ACM + NCM + UF896_TOOLS CD-ROM
+bcdDevice 0x0101
+LAN 192.168.8.1/24
+```
+
+On Windows 10/11 the expected devices are:
+
+```text
+UsbNcm Host Device
+USB Serial / COM
+UF896 TOOLS USB Device
+```
+
+The tools CD is read-only.
+
+### LEGACY — RNDIS for older Windows
+
+In Windows Explorer choose **Eject** on `UF896_TOOLS`. The watcher detects media removal and automatically performs:
+
+```text
+NORMAL: ACM + NCM + CD-ROM
+            ↓ Eject
+LEGACY: RNDIS + ACM + CD-ROM
+```
+
+Legacy profile details:
+
+```text
+RNDIS is the first USB interface
+bcdDevice 0x0102
+DHCP/Gateway/DNS: 192.168.8.1
+```
+
+The tools CD is reinserted after the switch. The validated Windows result is the inbox `Remote NDIS Compatible Device`, a DHCP address in `192.168.8.x`, and working access to `192.168.8.1`.
+
+Return to NCM:
+
+```bash
+uf896-usb-mode normal
+```
+
+Inspect state:
+
+```bash
+uf896-zerocd status
+uf896-usb-mode status
+```
+
+After reboot the device always starts in NORMAL/NCM.
+
+---
+
+## 📟 Supported Devices
+
+| Board target | Profile | Device | SoC | RAM | Main features |
+| :-- | :-- | :-- | :-- | :-- | :-- |
+| **`thwc,uf896`** | **`thwc-uf896`** | **THWC UF896 4G Modem Stick** | MSM8916 | 512 MB (tested unit) | **NCM/ACM, WINNCM, ZeroCD, Eject→RNDIS, stable serial/MAC, Wi-Fi, LTE** |
+| `hmu05` | `generic-hmu05` | Generic HMU05 (250605 V0S) | MSM8916 | 512 MB | NCM, ACM, Wi-Fi, LTE, No-Sleep Patch, Ramoops, EDL/Fastboot |
+| `ufi001b` | `generic-ufi001b` | Generic UFI001B | MSM8916 | 512 MB | NCM, ACM, Wi-Fi, LTE, EDL/Fastboot, Ramoops |
+| `uz801` | `yiming-uz801v3` | YiMing UZ801 v3 | MSM8916 | 512 MB | NCM, ACM, Wi-Fi, LTE, EDL/Fastboot, swapped LED mapping |
+| `uf02` | `generic-uf02` | Generic UF02 / UF2 | MSM8916 | 512 MB | NCM, ACM, Wi-Fi, LTE, EDL/Fastboot |
+
+> [!WARNING]
+> Do not flash UF896 with a bootloader, `firmware.zip`, or image intended for HMU05/UFI001B/UZ801/UF02. The `thwc-uf896` profile is deliberately separated from generic profiles. The current branch intentionally does not publish the generic firmware bundle/flasher for UF896 because bootloader payloads from other MSM8916 boards are not considered safe for it.
+
+---
+
+## 🔄 Recovery and Reboot Modes
+
+### Reboot to EDL
+
+From SSH or USB serial console:
+
+```bash
+reboot-edl
+```
+
+Expected host-side USB identity:
+
+```text
+05c6:9008 Qualcomm HS-USB QDLoader 9008
+```
+
+Linux check:
+
+```bash
+lsusb | grep 05c6:9008
+```
+
+EDL can be used with tools such as `edl` or `qdl` for low-level recovery.
+
+### Reboot to Fastboot
+
+```bash
+reboot-fastboot
+fastboot devices
+```
+
+### Android / ADB → EDL
+
+```bash
+adb reboot edl
+```
+
+---
+
+## ⚡ Flashing Firmware
+
+### 1. Enter Qualcomm EDL (`05c6:9008`)
+
+Possible methods:
+
+- hardware EDL test points while connecting USB;
+- `adb reboot edl` from Android;
+- `reboot-edl` from OpenWrt.
+
+Verify:
+
+```bash
+lsusb | grep 05c6:9008
+```
+
+### Scenario A: first migration from stock Android to OpenWrt
+
+> [!CAUTION]
+> **Do not blindly write boot/rootfs or bootloader partitions from another board.** Factory Android layouts contain device-unique radio/calibration data including `fsc`, `fsg`, `modemst1`, `modemst2`, `modem`, `persist`, and `sec`. Losing them can destroy IMEI, MAC addresses, RF calibration, or modem functionality.
+
+For generic profiles that produce the standard `*-flash.sh`, use the generated script from `openwrt/bin/targets/msm89xx/msm8916/`:
+
+```bash
+cd openwrt/bin/targets/msm89xx/msm8916/
+chmod +x openwrt-msm89xx-msm8916-<board>-flash.sh
+./openwrt-msm89xx-msm8916-<board>-flash.sh
+```
+
+The script backs up critical partitions, updates GPT, writes the board firmware/boot/rootfs, restores calibration data, and reboots.
+
+> [!IMPORTANT]
+> **THWC UF896 does not automatically use this generic path.** The `thwc-uf896` profile intentionally does not publish generic `firmware.zip`/`flash.sh`, because bootloader payloads from another MSM8916 board are not accepted as safe for UF896. Use only a UF896-specific validated installation procedure and artifacts explicitly built for `thwc-uf896`.
+
+### Scenario B: updating an existing OpenWrt installation
+
+The preferred path is standard `sysupgrade`, which preserves configuration and overlay storage.
+
+For clean EDL recovery of an already prepared device, write only partitions that match the exact board and its current GPT. Never copy bootloader/NV partitions between board models.
+
+---
+
+## 🔧 Fastboot Recovery
+
+If the board bootloader supports Fastboot:
+
+```bash
+reboot-fastboot
+fastboot devices
+```
+
+Fastboot is a boot/recovery transport and does not replace backups of Qualcomm device-unique NV/calibration partitions.
+
+---
+
+## 🔄 Sysupgrade
+
+The OpenWrt sysupgrade path preserves persistent `rootfs_data`. Platform code tears down services/subsystems before upgrading.
+
+Verify overlay:
+
+```bash
+mount | grep overlay
+```
+
+Expected form:
+
+```text
+/dev/mmcblk0p15 on /overlay type ext4 (rw,noatime)
+overlayfs:/overlay on / type overlay (...)
+```
+
+Preinit filesystem checking runs before `mount_root`:
+
+```text
+rootfs_data: ext filesystem detected
+rootfs_data: running e2fsck -p
+rootfs_data: filesystem errors repaired
+mount_root: switching to ext4 overlay
+```
+
+An existing EXT filesystem is not reformatted simply because repairable errors are found; a new filesystem is created only when no suitable EXT filesystem exists.
+
+---
+
+## 🔌 Default Device Access
+
+| Service | Access | Default |
+| :-- | :-- | :-- |
+| **LuCI** | `http://192.168.8.1` | set a root password |
+| **SSH** | `ssh root@192.168.8.1` | a clean image may initially have no password — **run `passwd`** |
+| **USB Serial Console** | `/dev/ttyACM0` / COM | root console via ACM |
+| **USB Ethernet (UF896 NORMAL)** | CDC NCM | `192.168.8.1/24`, DHCP |
+| **USB Ethernet (UF896 LEGACY)** | RNDIS | `192.168.8.1/24`, DHCP |
+| **UF896 Tools CD** | `UF896_TOOLS` | read-only CD-ROM |
+| **Wi-Fi AP** | SSID `OpenWrt`, 2.4 GHz | may be open on a clean configuration |
+| **EDL** | `reboot-edl` | Qualcomm USB `05c6:9008` |
+| **Fastboot** | `reboot-fastboot` | `fastboot devices` |
+
+> [!WARNING]
+> Set a root password with `passwd` and secure Wi-Fi before using the device on an untrusted network.
+
+---
+
+## 📶 SIM Detection, Carrier Auto-Provisioning & Reboot Behavior
+
+After SIM insertion, `qcom-carrier-autocfg` uses ModemManager to identify MCC-MNC/IMSI, select APN settings, and if necessary deploy a Qualcomm Carrier MBN (`mcfg_sw.mbn`).
+
+If the required MBN differs from the active one, the system syncs storage and performs a **one-time automatic reboot** so the Hexagon DSP can load the new profile. This is expected behavior, not a bootloop.
+
+After reboot, a matching MBN is not replaced again, so no additional reboot is required; ModemManager creates the LTE bearer with the selected APN/IP stack.
+
+SIM hot-swap behavior:
+
+- same/compatible MBN family — connectivity can normally recover without reboot;
+- different MBN family — one reboot may be required to load the new profile.
+
+Monitor provisioning:
+
+```bash
+logread -f -e carrier-autocfg
+```
+
+Example initial detection:
+
+```text
+[carrier-autocfg] Started MSM8916 SIM Carrier Auto-Provisioning Engine
+[carrier-autocfg] Matched carrier in global APN database for MCC-MNC 405861
+[carrier-autocfg] Deploying Carrier MBN 'generic/apac/reliance/commerci/mcfg_sw.mbn' into /lib/firmware/MCFG_SW.MBN...
+[carrier-autocfg] Carrier MBN radio firmware updated for 'Reliance Jio'. Scheduling automatic reboot in 3 seconds to initialize Hexagon DSP...
+```
+
+After reboot:
+
+```text
+[carrier-autocfg] Active Carrier MBN already matches generic/apac/reliance/commerci/mcfg_sw.mbn.
+[carrier-autocfg] Boot-time carrier provisioning completed successfully. No reboot required.
+[carrier-autocfg] Requesting ModemManager bearer connection for APN 'jionet' (ipv4v6)...
+```
+
+---
+
+## 📂 eMMC Partition Layout
+
+Exact numbering and size depend on the board/eMMC capacity. A typical OpenWrt layout contains:
+
+| Partition | Label | Type | Purpose |
+| :-- | :-- | :-- | :-- |
+| `modem` | `modem` | VFAT/raw | Qualcomm modem/WCNSS firmware |
+| `persist` | `persist` | EXT4 | factory calibration and Wi-Fi NVRAM |
+| `boot` | `boot` | Raw | Linux kernel + DTB |
+| `rootfs` | `system/rootfs` | SquashFS | read-only OpenWrt rootfs |
+| `rootfs_data` | `rootfs_data` | EXT4 | persistent writable overlay |
+
+Always verify the actual GPT of the exact board before performing low-level writes. Do not transplant partition tables between different hardware variants without validation.
+
+---
+
+## 📦 Package & Kernel Driver Repository
+
+Project APK feeds for OpenWrt 25.12.5 are published through GitHub Pages:
+
+https://akbar-npj.github.io/msm8916-openwrt/
+
+Example feed setup:
+
+```bash
+cat << 'EOF' > /etc/apk/repositories.d/customfeeds.list
+https://akbar-npj.github.io/msm8916-openwrt/releases/25.12.5/targets/msm89xx/msm8916/packages/packages.adb
+EOF
+
+apk update
+```
+
+Examples:
+
+```bash
+apk add kmod-usb-net-rtl8152
 apk add luci-app-wireguard
 ```
 
@@ -328,6 +713,4 @@ apk add luci-app-wireguard
 
 ## 📜 License
 
-This project is licensed under the **GNU General Public License v2.0 (GPL-2.0)**.
-
-Qualcomm firmware dumper components are licensed under the BSD-3-Clause License.
+This project is licensed under the **GNU General Public License v2.0 (GPL-2.0)**. Qualcomm firmware dumper components use the BSD-3-Clause License.
