@@ -31,7 +31,7 @@ define Package/$(PKG_NAME)
 		+kmod-usb-gadget-serial \
 		+kmod-usb-gadget-mass-storage \
 		+kmod-usb-gadget-ncm \
-		+kmod-usb-gadget-rndis \
+		+kmod-usb-gadget-eth \
 		+coreutils-truncate \
 		+coreutils-shuf \
 		+coreutils-dd
