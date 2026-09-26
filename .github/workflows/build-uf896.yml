@@ -13,8 +13,95 @@ on:
       - '.github/workflows/build-uf896.yml'
   workflow_dispatch:
 
+concurrency:
+  group: uf896-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  preflight:
+    name: Fast preflight
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate UF896 sources
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ISO_B64=packages/uci-usb-gadget/files/UF896_TOOLS.iso.gz.b64
+          PKG_MK=packages/uci-usb-gadget/Makefile
+          EXPECTED_SHA=18ff19b550161bdafe3d1cb279eda983a7be00dc63fe5ebe6249098ef6384e0e
+          EXPECTED_SIZE=2097152
+          MIN_CD_SIZE=614400
+
+          required_files=(
+            "$ISO_B64"
+            "$PKG_MK"
+            packages/uci-usb-gadget/files/usb-gadget.sh
+            packages/uci-usb-gadget/files/uf896-usb-mode
+            packages/uci-usb-gadget/files/uf896-zerocd
+            packages/uci-usb-gadget/files/usb-gadget.init
+            packages/uci-usb-gadget/files/usb-zerocd.init
+            packages/uci-usb-gadget/files/usbgadget.config
+            diffconfigs/uf896
+            msm89xx/image/msm8916.mk
+          )
+
+          for file in "${required_files[@]}"; do
+            test -s "$file" || { echo "Missing or empty required file: $file" >&2; exit 1; }
+          done
+
+          echo 'Checking shell syntax...'
+          for file in \
+            packages/uci-usb-gadget/files/usb-gadget.sh \
+            packages/uci-usb-gadget/files/uf896-usb-mode \
+            packages/uci-usb-gadget/files/uf896-zerocd \
+            packages/uci-usb-gadget/files/usb-gadget.init \
+            packages/uci-usb-gadget/files/usb-zerocd.init; do
+            sh -n "$file"
+          done
+
+          echo 'Checking embedded UF896_TOOLS image...'
+          base64 -d "$ISO_B64" > /tmp/UF896_TOOLS.iso.gz
+          gzip -t /tmp/UF896_TOOLS.iso.gz
+          gzip -dc /tmp/UF896_TOOLS.iso.gz > /tmp/UF896_TOOLS.iso
+          echo "$EXPECTED_SHA  /tmp/UF896_TOOLS.iso" | sha256sum -c -
+
+          size=$(stat -c '%s' /tmp/UF896_TOOLS.iso)
+          test "$size" -eq "$EXPECTED_SIZE" || {
+            echo "UF896_TOOLS.iso size mismatch: got $size, expected $EXPECTED_SIZE" >&2
+            exit 1
+          }
+          test "$size" -ge "$MIN_CD_SIZE" || {
+            echo "UF896_TOOLS.iso is below mass-storage CD minimum: $size < $MIN_CD_SIZE" >&2
+            exit 1
+          }
+
+          echo 'Checking package and target configuration...'
+          grep -Fq "$EXPECTED_SHA" "$PKG_MK"
+          grep -q '^\s*+kmod-usb-gadget-eth' "$PKG_MK"
+          if grep -q '^\s*+kmod-usb-gadget-rndis' "$PKG_MK"; then
+            echo 'Invalid dependency: kmod-usb-gadget-rndis does not exist in this OpenWrt tree' >&2
+            exit 1
+          fi
+
+          grep -q '^CONFIG_TARGET_msm89xx_msm8916_DEVICE_thwc-uf896=y$' diffconfigs/uf896
+          grep -q '^CONFIG_TARGET_ROOTFS_INITRAMFS=y$' diffconfigs/uf896
+          grep -q '^CONFIG_PACKAGE_kmod-nft-tproxy=y$' diffconfigs/uf896
+          grep -q '^CONFIG_PACKAGE_ip-full=y$' diffconfigs/uf896
+          grep -Fq 'define Device/thwc-uf896' msm89xx/image/msm8916.mk
+          grep -Fq 'DEVICE_DTS := msm8916-uf896' msm89xx/image/msm8916.mk
+
+          git diff --check
+          echo 'UF896 fast preflight: PASS'
+
   build:
+    name: Build firmware
+    needs: preflight
     runs-on: ubuntu-22.04
     timeout-minutes: 180
 
@@ -43,6 +130,15 @@ jobs:
         run: |
           git clone --filter=blob:none https://git.openwrt.org/openwrt/openwrt.git openwrt
           git -C openwrt checkout "${{ steps.version.outputs.version }}"
+          mkdir -p openwrt/dl
+
+      - name: Cache OpenWrt source downloads
+        uses: actions/cache@v4
+        with:
+          path: openwrt/dl
+          key: uf896-dl-${{ runner.os }}-${{ steps.version.outputs.version }}-${{ hashFiles('packages/**/Makefile', 'msm89xx/**/Makefile', 'diffconfigs/uf896') }}
+          restore-keys: |
+            uf896-dl-${{ runner.os }}-${{ steps.version.outputs.version }}-
 
       - name: Install MSM8916 BSP and project packages
         run: |
@@ -86,10 +182,35 @@ jobs:
           make download -j8
           find dl -size -1024c -delete || true
 
-      - name: Build firmware
+      - name: Smoke-build USB gadget package
         working-directory: openwrt
         run: |
-          make -j"$(nproc)" || make -j1 V=s
+          make package/msm8916/uci-usb-gadget/compile -j"$(nproc)" V=s
+
+      - name: Build firmware
+        working-directory: openwrt
+        shell: bash
+        run: |
+          set -o pipefail
+          make -j"$(nproc)" V=s 2>&1 | tee ../uf896-build.log
+
+      - name: Show build failure context
+        if: failure()
+        shell: bash
+        run: |
+          if [ -f uf896-build.log ]; then
+            echo '===== Last 400 lines of UF896 build ====='
+            tail -n 400 uf896-build.log
+          fi
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uf896-build-log-${{ github.run_number }}
+          if-no-files-found: ignore
+          retention-days: 7
+          path: uf896-build.log
 
       - name: Verify UF896 output
         shell: bash
@@ -109,14 +230,11 @@ jobs:
           test -n "$SYSTEM"
           test -n "$MANIFEST"
 
-          # Both boot images must contain the UF896 DTB identity.
           grep -aFq 'thwc,uf896' "$BOOT"
           grep -aFq 'thwc,uf896' "$INITRAMFS"
 
-          # Parse Android boot-image cmdline. The normal image intentionally
-          # points at p14; the RAM-only initramfs image must not depend on eMMC.
           python3 - "$BOOT" "$INITRAMFS" <<'PY'
-          import struct, sys
+          import sys
 
           def cmdline(path):
               data = open(path, 'rb').read(1632)
@@ -134,9 +252,6 @@ jobs:
           assert 'root=' not in ram
           PY
 
-          # Forkop's current OpenWrt/APK backend dependencies must already be
-          # in the image, including target-specific kernel modules that cannot
-          # safely be assumed to exist in the official package repository.
           for pkg in \
             bind-dig ca-bundle coreutils-base64 curl ip-full \
             kmod-inet-diag kmod-netlink-diag kmod-nft-nat \
@@ -148,8 +263,6 @@ jobs:
               }
           done
 
-          # UF896 must not publish the generic flasher/firmware bundle: the
-          # upstream generator currently hardcodes a YiMing UZ801 lk2nd target.
           test -z "$(find "$TARGET_DIR" -maxdepth 1 -type f -name '*thwc-uf896*firmware.zip' -print -quit)"
           test -z "$(find "$TARGET_DIR" -maxdepth 1 -type f -name '*thwc-uf896*flash.sh' -print -quit)"
 
