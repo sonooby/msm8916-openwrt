@@ -1,0 +1,168 @@
+#!/bin/sh
+
+PIDFILE=/var/run/uf896-zerocd.pid
+LOCKDIR=/var/run/uf896-usb-mode.lock
+G=/sys/kernel/config/usb_gadget/g1
+C="$G/configs/c.1"
+M="$G/functions/mass_storage.tools"
+ISO=/usr/share/usb-gadget/UF896_TOOLS.iso
+ISO_MIN_BYTES=614400
+LOGTAG=uf896-zerocd
+STARTUP_GRACE=5
+
+log() {
+    logger -t "$LOGTAG" "$*"
+}
+
+reinsert_medium() {
+    local iso_size
+    [ -e "$M/lun.0/file" ] || return 1
+    [ -f "$ISO" ] || return 1
+    iso_size="$(wc -c < "$ISO" 2>/dev/null)"
+    [ -n "$iso_size" ] || return 1
+    [ "$iso_size" -ge "$ISO_MIN_BYTES" ] || {
+        log "tools ISO too small: ${iso_size} bytes; minimum for USB CD-ROM is ${ISO_MIN_BYTES}"
+        return 1
+    }
+    echo "$ISO" > "$M/lun.0/file" 2>/dev/null
+}
+
+run_daemon() {
+    echo $$ > "$PIDFILE"
+    trap 'rm -f "$PIDFILE"; exit 0' INT TERM EXIT
+
+    in_normal=0
+    armed=0
+    normal_since=0
+    reinsert_count=0
+
+    log "watcher started"
+
+    while :; do
+        # Never inspect or modify the LUN while a profile transition owns it.
+        if [ -d "$LOCKDIR" ]; then
+            sleep 1
+            continue
+        fi
+
+        # Only a NORMAL/NCM profile can request the one-way ZeroCD switch.
+        if [ -L "$C/ncm.usb0" ] && [ ! -L "$C/rndis.usb0" ] && [ -e "$M/lun.0/file" ]; then
+            now="$(date +%s)"
+
+            if [ "$in_normal" != "1" ]; then
+                in_normal=1
+                armed=0
+                normal_since="$now"
+                reinsert_count=0
+                log "normal profile detected; ${STARTUP_GRACE}s startup grace before eject is armed"
+            fi
+
+            medium="$(cat "$M/lun.0/file" 2>/dev/null)"
+            age=$((now - normal_since))
+
+            if [ "$age" -lt "$STARTUP_GRACE" ]; then
+                # Windows can immediately replay a previous eject state when the
+                # same removable CD device reappears. Treat ejects during the
+                # startup grace period as stale host state, reinsert the ISO,
+                # and do not switch profiles.
+                if [ -z "$medium" ]; then
+                    if [ "$reinsert_count" -lt 3 ]; then
+                        reinsert_count=$((reinsert_count + 1))
+                        if reinsert_medium; then
+                            log "startup CD eject observed; reinserted tools ISO (attempt $reinsert_count)"
+                        else
+                            log "startup CD eject observed; ISO reinsertion failed"
+                        fi
+                    fi
+                fi
+                sleep 1
+                continue
+            fi
+
+            if [ -n "$medium" ]; then
+                if [ "$armed" != "1" ]; then
+                    armed=1
+                    log "eject watcher armed"
+                fi
+            elif [ "$armed" = "1" ]; then
+                # This is a genuine eject after the normal profile has been
+                # stable long enough to arm the watcher.
+                armed=0
+                log "tools CD-ROM eject detected; switching to legacy RNDIS"
+                if /usr/sbin/uf896-usb-mode legacy-now; then
+                    log "legacy RNDIS profile active"
+                else
+                    log "legacy switch failed; requesting normal NCM recovery"
+                    /usr/sbin/uf896-usb-mode normal-now || true
+                fi
+                in_normal=0
+                normal_since=0
+                reinsert_count=0
+            else
+                # The grace period expired but there is still no medium and we
+                # never armed. Recover the service CD instead of silently
+                # staying as an empty drive.
+                if reinsert_medium; then
+                    normal_since="$now"
+                    reinsert_count=0
+                    log "tools CD was empty before arming; reinserted ISO and restarted startup grace"
+                fi
+            fi
+        else
+            in_normal=0
+            armed=0
+            normal_since=0
+            reinsert_count=0
+        fi
+
+        sleep 1
+    done
+}
+
+start_daemon() {
+    if [ -s "$PIDFILE" ]; then
+        pid="$(cat "$PIDFILE" 2>/dev/null)"
+        [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && return 0
+        rm -f "$PIDFILE"
+    fi
+
+    start-stop-daemon -S -b -x "$0" -- run
+}
+
+stop_daemon() {
+    [ -s "$PIDFILE" ] || return 0
+    pid="$(cat "$PIDFILE" 2>/dev/null)"
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+        kill "$pid" 2>/dev/null || true
+        i=0
+        while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 10 ]; do
+            sleep 1
+            i=$((i + 1))
+        done
+        kill -9 "$pid" 2>/dev/null || true
+    fi
+    rm -f "$PIDFILE"
+}
+
+status_daemon() {
+    if [ -s "$PIDFILE" ]; then
+        pid="$(cat "$PIDFILE" 2>/dev/null)"
+        if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+            echo "UF896 ZeroCD watcher: running (PID $pid)"
+            /usr/sbin/uf896-usb-mode status
+            return 0
+        fi
+    fi
+    echo "UF896 ZeroCD watcher: stopped"
+    /usr/sbin/uf896-usb-mode status 2>/dev/null || true
+    return 1
+}
+
+case "${1:-}" in
+    run) run_daemon ;;
+    start) start_daemon ;;
+    stop) stop_daemon ;;
+    restart) stop_daemon; start_daemon ;;
+    status) status_daemon ;;
+    *) echo "Usage: $0 {start|stop|restart|status|run}"; exit 1 ;;
+esac
