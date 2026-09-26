@@ -82,19 +82,19 @@ jobs:
           }
 
           echo 'Checking package and target configuration...'
-          grep -Fq "$EXPECTED_SHA" "$PKG_MK"
-          grep -q '^\s*+kmod-usb-gadget-eth' "$PKG_MK"
-          if grep -q '^\s*+kmod-usb-gadget-rndis' "$PKG_MK"; then
+          grep -Fq "$EXPECTED_SHA" "$PKG_MK" || { echo 'ISO SHA is not pinned in package Makefile' >&2; exit 1; }
+          grep -Eq '^[[:space:]]*\+kmod-usb-gadget-eth' "$PKG_MK" || { echo 'Missing kmod-usb-gadget-eth dependency' >&2; exit 1; }
+          if grep -Eq '^[[:space:]]*\+kmod-usb-gadget-rndis' "$PKG_MK"; then
             echo 'Invalid dependency: kmod-usb-gadget-rndis does not exist in this OpenWrt tree' >&2
             exit 1
           fi
 
-          grep -q '^CONFIG_TARGET_msm89xx_msm8916_DEVICE_thwc-uf896=y$' diffconfigs/uf896
-          grep -q '^CONFIG_TARGET_ROOTFS_INITRAMFS=y$' diffconfigs/uf896
-          grep -q '^CONFIG_PACKAGE_kmod-nft-tproxy=y$' diffconfigs/uf896
-          grep -q '^CONFIG_PACKAGE_ip-full=y$' diffconfigs/uf896
-          grep -Fq 'define Device/thwc-uf896' msm89xx/image/msm8916.mk
-          grep -Fq 'DEVICE_DTS := msm8916-uf896' msm89xx/image/msm8916.mk
+          grep -q '^CONFIG_TARGET_msm89xx_msm8916_DEVICE_thwc-uf896=y$' diffconfigs/uf896 || { echo 'UF896 target missing from diffconfig' >&2; exit 1; }
+          grep -q '^CONFIG_TARGET_ROOTFS_INITRAMFS=y$' diffconfigs/uf896 || { echo 'Initramfs target missing from diffconfig' >&2; exit 1; }
+          grep -q '^CONFIG_PACKAGE_kmod-nft-tproxy=y$' diffconfigs/uf896 || { echo 'kmod-nft-tproxy missing from diffconfig' >&2; exit 1; }
+          grep -q '^CONFIG_PACKAGE_ip-full=y$' diffconfigs/uf896 || { echo 'ip-full missing from diffconfig' >&2; exit 1; }
+          grep -Fq 'define Device/thwc-uf896' msm89xx/image/msm8916.mk || { echo 'UF896 device definition missing' >&2; exit 1; }
+          grep -Fq 'DEVICE_DTS := msm8916-thwc-uf896' msm89xx/image/msm8916.mk || { echo 'UF896 DTS selection mismatch' >&2; exit 1; }
 
           git diff --check
           echo 'UF896 fast preflight: PASS'
